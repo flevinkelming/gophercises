@@ -13,78 +13,78 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
-func exitOnFail(msg string) {
-	fmt.Println(msg)
-	os.Exit(1)
-}
+func main() {
+	fname := flag.String("fname", "paths.yaml", "Specify the redirect YAML or JSON encoded file.")
+	ftype := flag.String("ftype", "yaml", "Specify the file encoding type.")
+	flag.Parse()
 
-type encoding struct {
-	Type string
-}
-
-func (e *encoding) Unmarshal(data []byte, out interface{}) error {
-	if e.Type == "yaml" {
-		return yaml.Unmarshal(data, out)
+	if strings.Split(*fname, ".")[1] != *ftype {
+		flag.Usage()
+		os.Exit(1)
 	}
 
-	return json.Unmarshal(data, out)
+	bs, err := ioutil.ReadFile(*fname) // "Because ReadFile reads the whole file,
+					   // it does not treat an EOF from Read as an error to be reported."
+	if err != nil {
+		log.Fatalf("[!] Error while reading file: %s", err) // "Fatalf is equivalent to Printf()
+								    // followed by a call to os.Exit(1)."
+	}
+
+	var paths pathURLs
+
+	var enc encoding = *ftype
+	if err := enc.Unmarshal(bs, &paths); err != nil {
+		log.Fatalf("[!] Error while decoding .%s file: %s", *ftype, err)
+	}
+
+	pathMap := newMap(paths)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", indexHandler)
+
+	rmw := redirectMiddleware(pathMap, mux)
+
+	log.Fatal(http.ListenAndServe(":8080", rmw))
 }
 
-type urlPath struct {
+type encoding string
+
+func (e *encoding) Unmarshal(data []byte, v interface{}) error {
+	if e == "yaml" {
+		return yaml.Unmarshal(data, v)
+	}
+
+	return json.Unmarshal(data, v)
+}
+
+type pathURL struct {
 	Path string `yaml:"path" json:"path"`
 	URL  string `yaml:"url" json:"url"`
 }
 
-type urlPaths []urlPath
+type pathURLs []pathURL
 
-func convertToMap(paths urlPaths) map[string]string {
-	urlPathsMap := make(map[string]string)
+// Factory function (constructor) w/ identifier as type, prepended by `new` (`New` if exported).
+func newMap(paths pathURLs) map[string]string {
+	pathMap := make(map[string]string, len(paths))
 	for _, p := range paths {
-		urlPathsMap[p.Path] = p.URL
+		pathMap[p.Path] = p.URL
 	}
 
-	return urlPathsMap
+	return pathMap
 }
 
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "Hello, World!")
 }
 
-func newServeMux() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", indexHandler)
-	return mux
-}
-
-func encodingHandler(urlPathsMap map[string]string, fallback http.Handler) http.HandlerFunc {
+func redirectMiddleware(pathMap map[string]string, fallback http.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if dest, ok := urlPathsMap[r.URL.Path]; ok {
+		if dest, ok := pathMap[r.URL.Path]; ok {
 			http.Redirect(w, r, dest, http.StatusFound)
 			return
 		}
 
 		fallback.ServeHTTP(w, r)
 	}
-}
-
-func main() {
-	pathEncodedFile := flag.String("enc", "paths.yaml", "Specify a YAML or JSON file containing 'path: url' information.")
-	flag.Parse()
-
-	raw, err := ioutil.ReadFile(*pathEncodedFile)
-	if err != nil {
-		exitOnFail(fmt.Sprintf("Unable to parse file: %s", *pathEncodedFile))
-	}
-
-	enc := encoding{Type: strings.Split(*pathEncodedFile, ".")[1]}
-	var paths urlPaths
-	if err := enc.Unmarshal(raw, &paths); err != nil {
-		exitOnFail(fmt.Sprintf("An error ocurred: %s", err.Error()))
-	}
-	urlPathsMap := convertToMap(paths)
-
-	mux := newServeMux()
-	redirectHandler := encodingHandler(urlPathsMap, mux)
-
-	log.Fatal(http.ListenAndServe(":8080", redirectHandler))
 }

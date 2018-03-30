@@ -23,16 +23,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	bs, err := ioutil.ReadFile(*fname) // "Because ReadFile reads the whole file,
-					   // it does not treat an EOF from Read as an error to be reported."
+	bs, err := ioutil.ReadFile(*fname) // "Because ReadFile reads the whole file, it does not treat an EOF from Read as an error to be reported."
 	if err != nil {
-		log.Fatalf("[!] Error while reading file: %s", err) // "Fatalf is equivalent to Printf()
-								    // followed by a call to os.Exit(1)."
+		log.Fatalf("[!] Error while reading file: %s", err) // "Fatalf is equivalent to Printf() followed by a call to os.Exit(1)."
 	}
 
 	var paths pathURLs
 
-	var enc encoding = *ftype
+	enc := encoding(*ftype)
 	if err := enc.Unmarshal(bs, &paths); err != nil {
 		log.Fatalf("[!] Error while decoding .%s file: %s", *ftype, err)
 	}
@@ -49,8 +47,8 @@ func main() {
 
 type encoding string
 
-func (e *encoding) Unmarshal(data []byte, v interface{}) error {
-	if e == "yaml" {
+func (e encoding) Unmarshal(data []byte, v interface{}) error {
+	if e == encoding("yaml") {
 		return yaml.Unmarshal(data, v)
 	}
 
